@@ -1,0 +1,456 @@
+---
+title: "MBP ANOVA Workflow_statistical_analysis"
+author: "Ben"
+date: "23.04.2024"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(ggsignif)
+library(car)
+library(rstatix)
+library(tibble)
+library(writexl)
+library(gridExtra)
+library(lme4)
+library(ez)
+library(MASS)         
+library(fitdistrplus)
+library(bestNormalize)
+library(WRS2)
+library(ggstatsplot)
+library(tidyverse)
+library(ggbeeswarm)
+library(DAAG)
+library(nlme)
+library(viridisLite)
+library(ggforce)
+library(ggsignif)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+#Uploading data
+
+```{r}
+# MBP morphology 2024-04 ground truth reanalysis - without extra samples for pairwise t-test
+#sheetname <- read_excel("D:/Kohorte/2021-05-10_D(iOL)3.0_MimicSS_ICC_MBP_O4_OLxday10_puro/2024-04-13 MBP ground truth post-process/2024-04-15 MBP ground truth - 80per overlap/2024-04-15 Overview 80per overlap-without extra samples.xlsx", sheet = "Reanalysis-exp-overview-woNA")
+#data_version <- "MBP_2024-04-15"
+
+# original version from first submission
+#sheetname <- read_excel("D:/Kohorte/2021-05-10_D(iOL)3.0_MimicSS_ICC_MBP_O4_OLxday10_puro/2023-05-21 MBP improvement coloc/Morphology/40 per overlap MBP DAPI/Reanalysis-40-overview.xlsx", sheet = "Reanalysis-overview")
+#data_version <- "MBP_2023_05_21"
+
+# sheetname for MBP coloc
+#sheetname <- read_excel("D:/Kohorte/2021-05-10_D(iOL)3.0_MimicSS_ICC_MBP_O4_OLxday10_puro/2023-05-21 MBP improvement coloc/Colocalization/40 per overlap/2023-05-24_Reanalysis_Coloc_MBP.xlsx", sheet = "2023-05-24_Reanalysis_Coloc_MBP")
+#data_version <- "MBP_2023-05-21"
+
+# data for O4 Morphology
+#sheetname <- read_excel("D:/Kohorte/2021-05-10_D(iOL)3.0_MimicSS_ICC_MBP_O4_OLxday10_puro/O4 Results of individual cells - REANALYSIS/REANALYSIS-20220620181007_Analysis-O4_individual_cells.xlsx", sheet = "20220620181007_Analysis")
+#data_version <- "O4_2022-06-20"
+
+# data for O4-Coloc of overview coverslips
+sheetname <- read_excel("D:/Kohorte/2021-05-10_D(iOL)3.0_MimicSS_ICC_MBP_O4_OLxday10_puro/2022-04-07_Analysis-O4_ordered.xlsx", sheet = "20220330132456_Analysis-B1_orde")
+data_version <- "O4_2022-03-30"
+
+```
+
+## Data Preparation
+Character for non-categorical data Factor for categorical data
+
+```{r}
+#datapreparation <- function(){
+  #exclude MS25 from analysis since no expression of MBP
+  assign("sheetname", filter(sheetname, ID != "MS25"))
+  assign("sheetname", filter(sheetname, Dox != "hiPSC"))
+  
+  assign("sheetnameDox6", filter(sheetname, Dox == "dox6"))
+  
+  #conditionsName <- "_day+10_dox6_"
+  #doxdaysName <- "dox6"
+
+  sheetname$Group <- as.factor(sheetname$Group)
+  sheetname$Group <- factor(sheetname$Group, levels=c("MS", "MC"))
+  sheetname$Dox <- as.factor(sheetname$Dox)
+  sheetname$Dox <- factor(sheetname$Dox, levels=c("dox6", "dox10"))
+  sheetname$R_ID <- as.factor(sheetname$R_ID)
+  sheetname$ID <- as.factor(sheetname$ID)
+  #sheetname$Cellline_ID <- as.factor(sheetname$Cellline_ID)
+
+  # for morphology
+  sheetname$branchLengthRDPerCell <- as.numeric(sheetname$branchLengthRDPerCell)
+  sheetname$branchLengthSkelPerCell <- as.numeric(sheetname$branchLengthSkelPerCell)
+  sheetname$junctionsRDPerCell <- as.numeric(sheetname$junctionsRDPerCell)
+  sheetname$junctionsSkelPerCell <- as.numeric(sheetname$junctionsSkelPerCell)
+  
+  # for O4 coloc
+  sheetname$O4_per <- as.double(sheetname$O4_per)
+  sheetname$O4 <- as.numeric(sheetname$O4)
+  # for MBP coloc
+  sheetname$AB_AreaPerCell <- as.numeric(sheetname$AB_AreaPerCell)
+  sheetname$MBP_per <- as.double(sheetname$MBP_per)
+```
+
+#Data exploration, distribution of variables
+```{r}
+#Morphology: branchLengthSkelPerCell, branchLengthRDPerCell, junctionsSkelPerCell, junctionsRDPerCell
+#Coloc: MBP_per, AB_AreaPerCell
+# O4-Coloc: O4_per, AB_AreaPerCell
+dependentVariableString <- "O4_per"
+dependentVariable <- sheetname[[dependentVariableString]]
+
+dox6_values <- sheetname[sheetname$Dox == "dox6", dependentVariableString][dependentVariableString]
+dox10_values <- sheetname[sheetname$Dox == "dox10", dependentVariableString][dependentVariableString]
+
+qqnorm(dependentVariable)
+#qqnorm(dox6_values)
+#qqnorm(dox10_values)
+#boxplot(log(dependentVariable) ~ Group*Dox, col=c("white","lightgray"),sheetname)
+
+# safe original mean and sd
+grouped_mean_sd <- sheetname %>%
+  group_by(Dox, Group) %>%
+  get_summary_stats(dependentVariableString, type = "mean_sd")
+grouped_mean_sd
+```
+# transform data: https://r-coder.com/box-cox-transformation-r/
+```{r}
+##For all values
+allDependentVariable <- dependentVariable
+# Best normalize transformation
+BN_dependentVariable <- bestNormalize(allDependentVariable)
+BN_dependentVariable
+#transform for dox6values only
+sheetname$transformed_dependentVariable <- predict(BN_dependentVariable)
+#sheetname$transformed_dependentVariable <- log(allDependentVariable)
+transformed_dependentVariable <- sheetname$transformed_dependentVariable
+qqnorm(transformed_dependentVariable)
+#qqnorm(log(allDependentVariable))
+```
+##DOX6 and DOX10 values - Checking assumptions for Two-way mixed ANOVA
+```{r}
+###two-way mixed anova
+##Assumption
+#1. No significant outliers 
+# in case of sig. outliers: keep the outliers in the data and perform robust ANOVA test using the WRS2 package.
+outliers <- sheetname %>%
+              group_by(Dox, Group) %>%
+              identify_outliers(transformed_dependentVariable)
+outliers
+#2. Normality
+# Note that, if your sample size per "group" is greater than 50, the normal QQ plot is preferred because at larger sample sizes the Shapiro-Wilk test becomes very sensitive even to a minor deviation from normality.
+shapiro <- sheetname %>%
+  group_by(Dox, Group) %>%
+  shapiro_test(transformed_dependentVariable)
+shapiro
+ggqqplot(sheetname, "transformed_dependentVariable", ggtheme = theme_bw()) +
+  facet_grid(Group ~ Dox, labeller = "label_both")
+
+
+#3.1 Homogeneity of variance: homogenous if Levene’s test (p > 0.05).
+levene <- sheetname %>%
+            group_by(Dox) %>%
+            levene_test(transformed_dependentVariable ~ Group)
+levene
+#3.2 Homogeneity of covariances assumption:  if p > 0.001 = equal covariances
+# tested by Box’s M. The covariance matrices should be equal across the cells formed by the between-subjects factors
+covariances <- box_m(sheetname[, "transformed_dependentVariable", drop = FALSE], sheetname$Group)
+covariances
+#4. Assumption of sphericity
+# the variance of the differences between within-subjects groups should be equal. This can be checked using the Mauchly’s test of sphericity, which is automatically reported when using the anova_test() R function.
+
+# ANOVA
+res.aov <- anova_test(
+  data = sheetname, dv = transformed_dependentVariable, wid = ID,
+  between = c(Group, Dox)
+  )
+get_anova_table(res.aov)
+
+
+# POST-HOC
+# Effect of Group for each DoxDayDosis
+one.way <- sheetname %>%
+  group_by(Dox) %>%
+  anova_test(dv = transformed_dependentVariable, wid = ID, between = Group) %>%
+  get_anova_table() %>%
+  adjust_pvalue(method = "bonferroni")
+one.way
+
+# Print the results (shows group and number of samples)
+group_counts <- sheetname %>%
+  group_by(Dox) %>%
+    summarise(n = n())  # Count the number of rows in each group
+print(group_counts)
+
+# Pairwise comparisons between treatment groups since repeated measurments
+pwc <- sheetname %>%
+  group_by(Dox) %>%
+  pairwise_t_test(
+    transformed_dependentVariable ~ Group, paired = TRUE,
+    p.adjust.method = "bonferroni"
+    )
+pwc
+
+# comparisons between treatment groups
+pwc2 <- sheetname %>%
+  group_by(Dox) %>%
+  t_test(transformed_dependentVariable ~ Group)%>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance("p.adj")
+pwc2
+
+# Assuming transformed_dependentVariable and Group are your actual data columns
+lmer_model <- lmer(
+  transformed_dependentVariable ~ Group + Dox + (1|ID),  # Include random effect for subject ID
+  data = sheetname
+)
+null_model <- lmer(
+  transformed_dependentVariable ~ Dox + (1|ID),  # Include random effect for subject ID
+  data = sheetname)
+
+# Analyze the model using summary or other functions from lme4
+summary(lmer_model)
+anova(null_model, lmer_model)
+
+transformed_grouped_mean_sd <- sheetname %>%
+  group_by(Dox, Group) %>%
+  get_summary_stats(transformed_dependentVariable, type = "mean_sd")
+transformed_grouped_mean_sd
+
+
+## Version mit ROBUST ANOVA from WRS package
+# https://cran.r-project.org/web/packages/WRS2/vignettes/WRS2.pdf
+# The main analyses were based on mixed analyses of variances (ANOVAs) on trimmed means (Wilcox, 2012) accounting for the non-normality, differences in sample size and outliers, investigating if there is a difference between patiens and healthy controls (between-subjects) and different Doxycyclin induction (within-subjects) on branchlengthpercell. 
+robust.anova <- bwtrim(dependentVariable ~ Group*Dox, id = ID, data = sheetname)
+robust.anova
+
+#Post-hoc comparison
+#within-subject
+#sppbb(transformed_dependentVariable ~ Group*Dox, ID, data = sheetname)
+#between-subject
+#sppba(transformed_dependentVariable ~ Group*Dox, ID, data = sheetname, avg = FALSE)
+
+```
+## Box plots 
+# https://davidbaranger.com/2018/03/05/showing-your-data-scatter-box-violin-plots/
+```{r}
+# create new column containing the combination of Dox and Group for each individual e.g. dox6 MC
+sheetname$doxXgroup <- paste(sheetname$Dox, sheetname$Group, sep = " ")
+# refactor new column to desired order
+sheetname$doxXgroup <- factor(sheetname$doxXgroup,levels=c("dox6 MS", "dox6 MC", "dox10 MS", "dox10 MC"))
+# create list with desired comparisons used in ggplot
+doxXgroup_comparisons <- list( c("dox6 MS", "dox6 MC"), c("dox10 MS", "dox10 MC"))
+
+# Create the plot with ggplot2
+plt <- ggplot(data = sheetname, aes(x = doxXgroup, y = transformed_dependentVariable, fill = Group)) +
+  geom_violin(alpha = 0.4, color=NA) +
+  geom_boxplot(notch = TRUE, alpha = 0.0, lwd = 0.8, show.legend = F, 
+               position = position_dodge(width = 0.9)) +
+  geom_sina(aes(color=Group), alpha = 0.3, show.legend = F) +
+  # set color of violin plot
+  scale_fill_viridis_d(option = "H", direction= -1) +
+  # set color of jitter plot points
+  scale_color_viridis_d(option ="H", direction= -1) +
+  #stat_compare_means(method= "t.test", paired=FALSE, label.y = c(2.5, 2.5), bracket.size=1, aes(group = Group, label = paste0("p = ", after_stat(p.format))))
+  #stat_summary(fun = mean, geom = "bar") +
+  #stat_summary(aes(col = Group), fun.data = "mean_se", geom = "errorbar", width=0.6) +
+  ggsignif::geom_signif(comparisons = doxXgroup_comparisons,test = "t.test", test.args = list(exact = FALSE)) + 
+  stat_compare_means(method = "anova")+
+  labs(
+    y= paste("transformed", dependentVariableString)
+  ) +
+  theme_pubr()
+
+plt
+
+# facet plot
+facet.plt <- ggplot(data = sheetname, aes(x = Group, y = transformed_dependentVariable, fill = Group)) +
+  facet_wrap(vars(Dox)) +
+  geom_violin(alpha = 0.4, color=NA, position=position_dodge()) +
+  geom_boxplot(notch = TRUE, alpha = 0.0, lwd = 0.8, show.legend = F, 
+               position = position_dodge(width = 0.9)) +
+  geom_sina(aes(color=Group), alpha = 0.3, show.legend = F) +
+  # set color of violin plot
+  scale_fill_viridis_d(option = "H", direction= -1) +
+  # set color of jitter plot points
+  scale_color_viridis_d(option ="H", direction= -1) +
+  stat_compare_means(method= "t.test", paired=FALSE, comparisons = list(c("MS", "MC")), label = "p.signif") + 
+  stat_compare_means(method = "anova", label.y.npc = "bottom", label.x.npc = 0.3)+
+  labs(
+    y= paste("transformed", dependentVariableString)
+  ) +
+  theme_pubr()
+
+facet.plt
+
+
+# Group the data by gender and fit  anova
+# The argument error.model is used to specify the ANOVA model from which the pooled error sum of squares and degrees of freedom are to be calculated.
+# Note that, statistical significance of the simple main effect analyses was accepted at a Bonferroni-adjusted alpha level of 0.025. This corresponds to the current level you declare statistical significance at (i.e., p < 0.05) divided by the number of simple main effect you are computing (i.e., 2). https://www.datanovia.com/en/lessons/anova-in-r/#report
+error.model <- lm(transformed_dependentVariable ~ Dox * Group, data = sheetname)
+sheetname %>%
+  group_by(Dox) %>%
+  anova_test(transformed_dependentVariable ~ Group, error = error.model)
+
+pwc <- pwc %>% add_xy_position(x = "Dox")
+pwc2 <- pwc2 %>% add_xy_position(x = "Dox")
+# plot as several added plots
+# Box plot with centered dots
+box.plt <- ggboxplot(data=sheetname, x="Dox", y="transformed_dependentVariable", color="Group", alpha = 0.0, lwd=0.9, notch = TRUE, legend = "none") +
+  #ggpar(box.plt, palette = c("black", "black"), legend = "none")+
+  geom_violin(aes(x = Dox, y = transformed_dependentVariable, fill = Group), alpha = 0.4, color=NA, position = position_dodge(width = 0.8)) +
+  geom_sina(aes(x = Dox, y = transformed_dependentVariable, color=Group), alpha = 0.5, show.legend = F, position = position_dodge(width = 0.8)) +
+  # set color of violin plot
+  scale_fill_viridis_d(option = "H", direction= -1) +
+  # set color of jitter plot points and box plot
+  scale_color_viridis_d(option ="H", direction= -1) +
+  stat_pvalue_manual(pwc) +
+  labs(
+    subtitle = get_test_label(res.aov, row=1, detailed = TRUE),
+    caption = get_pwc_label(pwc),
+    y= paste("transformed", dependentVariableString)
+    )+
+  theme_pubr()   
+box.plt
+
+pwc <- pwc %>% add_xy_position(x = "Dox")
+pwc2 <- pwc2 %>% add_xy_position(x = "Dox")
+
+violin.plt <- ggviolin(data=sheetname, x="Dox", y="transformed_dependentVariable", fill="Group", alpha = 0.4, color=NA, legend="none", width=1, position = position_dodge(width = 0.8)) +
+  # ylim=c(-3.5,3.5),
+  scale_x_discrete(expand= c(0, 0), breaks = c("dox6", "dox10")) +  
+  geom_boxplot(aes(x = Dox, y = transformed_dependentVariable, fill = Group), notch = TRUE, alpha = 0.0, lwd = 0.8, show.legend = F, position = position_dodge(width = 0.8), width=0.4) +
+  #ggpar(box.plt, palette = c("black", "black"), legend = "none") +
+  geom_sina(aes(x = Dox, y = transformed_dependentVariable, color=Group), alpha = 0.5, show.legend = F, position = position_dodge(width = 0.8), maxwidth=1) +
+  # set color of violin plot
+  scale_fill_viridis_d(option = "H", direction= -1) +
+  # set color of jitter plot points and box plot
+  scale_color_viridis_d(option ="H", direction= -1) +
+  stat_pvalue_manual(pwc, tip.length=0.00, bracket.size=0.5, y.position = 3.5) +
+  labs(
+    subtitle = get_test_label(res.aov, row=1, detailed = TRUE),
+    caption = get_pwc_label(pwc),
+    y= paste("transformed", dependentVariableString),
+    )+
+  theme_pubr()
+violin.plt
+
+```
+#Output - save boxplots and statsitical tests
+# final output should contain the following columns for each test:
+# name of dependent variable(Anaylsis), Group 1, Group 2, n1, n2, Method, F-value (parametric-methods)/U-statistic(non-parametric-methods),	p-value, p.signif, Method, Ctrl_mean,	Ctrl_SD,	SCZ_mean,	SCZ_SD
+```{r}
+printStats= TRUE
+if(printStats == TRUE){
+  # change class of BN_dependentVariable
+  normalize.pdf <- capture.output(BN_dependentVariable)
+  normalize.df <- data.frame(text = normalize.pdf)
+  # Function to find and extract name of chosen transformation as string
+
+  find_and_extract <- function(data_frame) {
+    chosen_norm_method <- NA  # Initialize variable to store the extracted value
+    row_index <- which(data_frame$text == "Based off these, bestNormalize chose:")  # Find the row index
+    if (length(row_index) > 0) {
+      next_row <- row_index + 1  # Index of the next row
+      if (next_row <= nrow(data_frame)) {  # Check if next row exists
+        chosen_norm_method <- strsplit(data_frame$text[next_row], "with")[[1]][1]  # Extract characters before "with"
+      }
+    }
+    return(chosen_norm_method)
+  }
+  # Apply the function to your data frame
+  chosen_norm_method <- find_and_extract(normalize.df)
+
+  trim.data <- capture.output(WRS2:::print.bwtrim(robust.anova)) # get ANOVA formula
+  # since direct saving of bwtrim object doesnt work, create dataframe with coressponding variables
+  robust.anova_summary <- data.frame(
+        formula = trim.data[2], 
+        effects=c(robust.anova$varnames[2], robust.anova$varnames[3], paste(robust.anova$varnames[2], robust.anova$varnames[3])),
+        value = c(robust.anova$Qa, robust.anova$Qb, robust.anova$Qab),
+        df1 = c(robust.anova$A.df[1], robust.anova$B.df[1], robust.anova$AB.df[1]),
+        df2 = c(robust.anova$A.df[2], robust.anova$B.df[2], robust.anova$AB.df[2]),
+        p.value = c(robust.anova$A.p.value, robust.anova$B.p.value, robust.anova$AB.p.value)
+  )
+  # save robust.anova data
+  write_xlsx(robust.anova_summary, paste0(data_version,"_", dependentVariableString,"_robust-ANOVA.xlsx"))
+  
+  # Create a data frame with desired columns and renamed values from summary_results
+  summary_df <- data.frame(
+    Analysis = dependentVariableString,
+    Dox = c(pwc$Dox[1],pwc$Dox[2]),
+    Group1 = pwc$group1,
+    Group2 = pwc$group2,
+    n1 = pwc$n1,
+    n2 = pwc$n2,
+    Group1_mean = c(grouped_mean_sd$mean[1], grouped_mean_sd$mean[3]), #MS dox6 and MS dox10
+    Group1_SD = c(grouped_mean_sd$sd[1], grouped_mean_sd$mean[3]),     #MS dox6 and MS dox10
+    Group2_mean = c(grouped_mean_sd$mean[2], grouped_mean_sd$mean[4]), #MC dox6 and MC dox10
+    Group2_SD = c(grouped_mean_sd$sd[2], grouped_mean_sd$sd[4]),       #MC dox6 and MC dox10
+    chosen_transformation = chosen_norm_method,
+    transformed_group1_mean = c(transformed_grouped_mean_sd$mean[1], transformed_grouped_mean_sd$mean[3]), #MS dox6 and MS dox10
+    transformed_group1_SD = c(transformed_grouped_mean_sd$sd[1], transformed_grouped_mean_sd$mean[3]),     #MS dox6 and MS dox10
+    transformed_group2_mean = c(transformed_grouped_mean_sd$mean[2], transformed_grouped_mean_sd$mean[4]), #MC dox6 and MC dox10
+    transformed_group2_SD = c(transformed_grouped_mean_sd$sd[2], transformed_grouped_mean_sd$sd[4]),       #MC dox6 and MC dox10
+    Method = "multiple measure two-way ANOVA",
+    Effect = c(res.aov$Effect[1], res.aov$Effect[1]),
+    DFn_total = c(res.aov$DFn[1], res.aov$DFn[1]),
+    DFd_total = c(res.aov$DFd[1], res.aov$DFd[1]),
+    Anova_F = c(res.aov$F[1], res.aov$F[1]),
+    Anova_p = c(res.aov$p[1], res.aov$p[1]),
+    Anova_sig = c(res.aov$`p<.05`[1],res.aov$`p<.05`[1]),
+    Effect.size.ges = c(res.aov$ges[1], res.aov$ges[1]),
+    Method.control = "robust ANOVA",
+    robust.Anova.effects = c(robust.anova_summary$effects[2],robust.anova_summary$effects[2]),
+    robust.Anova_F = c(robust.anova_summary$value[2], robust.anova_summary$value[2]),
+    robust.Anova_DFn = c(robust.anova_summary$df1[2], robust.anova_summary$df1[2]),
+    robust.Anova_DFd = c(robust.anova_summary$df2[2], robust.anova_summary$df2[2]),
+    robust.Anova_p = c(robust.anova_summary$p.value[2], robust.anova_summary$p.value[2]),
+    Method_post.hoc = "pairwise t-test",
+    DF = pwc$df,
+    t.value = pwc$statistic,
+    p.value = pwc$p,
+    p.adj = pwc$p.adj,
+    p.signif = pwc$p.adj.signif
+  )
+  
+  write_xlsx(summary_df, paste0(data_version,"_", dependentVariableString, "_summary.xlsx"))
+  write_xlsx(res.aov, paste0(data_version,"_", dependentVariableString,"_ANOVA.xlsx"))
+  
+
+  # Get the current working directory
+  current_wd <- getwd()
+  # Define the subfolder name
+  subfolder_name <- "Assumption-tests"
+  # Create the subfolder path
+  subfolder_path <- file.path(current_wd, subfolder_name)
+  # Check if the subfolder already exists (optional)
+  if (!dir.exists(subfolder_path)) {
+    # Create the subfolder if it doesn't exist
+    dir.create(subfolder_path)
+    message("Subfolder created successfully!")
+  } else {
+    message("Subfolder already exists.")
+  }
+  # save chosen normalize algorithm in subfolder
+  write_xlsx(normalize.df, paste0(subfolder_path,"/",data_version,"_", dependentVariableString, "_Normalizefunction.xlsx"))
+  # save Assumption tests in subfolder
+  write_xlsx(outliers, paste0(subfolder_path,"/",data_version,"_",dependentVariableString,"_outliers.xlsx"))
+  write_xlsx(shapiro, paste0(subfolder_path,"/",data_version,"_",dependentVariableString,"_shapiro.xlsx"))
+  write_xlsx(levene, paste0(subfolder_path,"/",data_version,"_",dependentVariableString,"_levene.xlsx"))
+  write_xlsx(covariances, paste0(subfolder_path,"/",data_version,"_",dependentVariableString,"_covariances.xlsx"))
+  
+  #pdf(file= paste0(data_version,"_data_", dependentVariableString,"_violin.plt",".pdf"))
+   #   print(violin.plt)
+  # dev.off()
+  }
+```
+
+
